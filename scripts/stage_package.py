@@ -21,8 +21,8 @@ def main() -> int:
     parser.add_argument("--output-root", type=Path, required=True)
     args = parser.parse_args()
     output_root = args.output_root.resolve()
-    if output_root.is_relative_to(SOURCE):
-        parser.error("output root must be outside the source tree")
+    if output_root.is_relative_to(SOURCE) and not output_root.is_relative_to(SOURCE / "Build"):
+        parser.error("output root must be outside source paths or inside Build")
     if not (DOCUMENTS / "README.md").is_file() or not (DOCUMENTS / "LICENSE").is_file():
         parser.error(f"missing centralized project documents: {DOCUMENTS}")
     output_root.mkdir(parents=True, exist_ok=True)

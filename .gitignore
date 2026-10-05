@@ -4,4 +4,6 @@ __pycache__/
 .venv/
 dist/
 build/
-Build/
+!Build/
+Build/*
+!Build/.gitignore

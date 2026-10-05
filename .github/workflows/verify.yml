@@ -1,0 +1,31 @@
+name: Verify DEX invocation evidence package
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-package:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install pinned package builder
+        run: python -m pip install uv==0.11.4
+      - name: Verify source, sdist, and installed wheel
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          UV_CACHE_DIR: ${{ github.workspace }}/Build/cache/uv
+          PIP_CACHE_DIR: ${{ github.workspace }}/Build/cache/pip
+        run: python scripts/validate_package.py
