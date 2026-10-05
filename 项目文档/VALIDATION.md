@@ -4,9 +4,9 @@
 
 验收目标：自编译 Java→DEX 产生直接、虚、接口、静态和 `/range` 调用；与 Android SDK dexdump 的每个调用点精确对照；数组数据中的调用操作码字节不误报；重签名的畸形长度、偏移和索引明确拒绝。验证脚本把工具版本、工具哈希、样本与源码哈希及每个异常原因写入 `Build/验证/DexInvokeEvidence-20261006/run-*/receipt.json`。
 
-2026-10-06 本地修订复测（UTC 2026-10-05 21:01）：
+2026-10-06 本地修订复测（UTC 2026-10-05 21:07）：
 
-- 完整收据：`Build/验证/DexInvokeEvidence-20261006/run-20261005T210108Z/receipt.json`，SHA-256 `4368672794968a10731675f5b766241418b4917062b4147fad94db4f9c3c24de`。初版的 20:45 收据由此版本取代，不能用来验证本次修订后的源码。
+- 完整收据：`Build/验证/DexInvokeEvidence-20261006/run-20261005T210739Z/receipt.json`，SHA-256 `5d899240e2022b3781271bf3a3767fcbc0bc07e1e54f8469c0b533cae0dd3818`。初版的 20:45 收据由此版本取代，不能用来验证本次修订后的源码。
 - JDK `javac 21.0.12.1`；Android D8 `2.1.7-r1`；验证用 dexdump 二进制 SHA-256 `7173a3cd722c668c96cd9198753c8f506fbfaafdd079ca72e1e4f4187e202213`。
 - 自写 Java 样本编译为 3 个 class 和一份 1,948 字节的 DEX 038；DEX SHA-256 `e3c6a30ca4fd21dc845cbc0e3f1b4d9c9e26b41268fb5f7b668f2d6e1b818e44`。
 - 10 个调用点与独立 dexdump 的 **文件偏移、方法内代码单元偏移、指令种类、目标方法索引**逐一相同；覆盖 `invoke-direct`、`invoke-virtual`、`invoke-interface`、`invoke-static`、`invoke-static/range`。数组数据中的合成操作码标记出现一次且未计入调用点，另有一个真实 try/catch 项通过结构校验。
