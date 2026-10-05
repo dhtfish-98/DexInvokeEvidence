@@ -33,6 +33,14 @@ public final class CallFixture {
         return a + b + c + d + e + f + g;
     }
 
+    public static int guarded(Box box, int value) {
+        try {
+            return box.virtual(value);
+        } catch (IllegalArgumentException rejected) {
+            return staticCall(value);
+        }
+    }
+
     public static int exercise(Box box, Action action, int input) {
         int direct = box.direct(input);
         int virtualCall = box.virtual(input);

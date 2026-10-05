@@ -4,6 +4,6 @@
 
 错误基线是按原始字节查找 `invoke` 操作码，或把 `method_id` 的 16 位索引读错位置。这种方法会把数组数据当代码，也可能把调用指向错误的方法。验证样本故意把多个调用操作码字节放进 `fill-array-data` 数据区；正确实现按指令边界跳过该区域，并以 Android SDK dexdump 独立对照。弱基线完全自造，不指称上游仓库存在漏洞。
 
-解析器支持标准 DEX 035–040 的 `invoke-virtual/super/direct/static/interface` 普通及 `/range` 形式，以及 `invoke-polymorphic` 的方法引用；`invoke-custom` 的 call-site 引用不是 `method_id`，当前版本明确拒绝。它不解析 APK 容器、多 DEX 聚合、运行时加载的代码，也不是完整 DEX 合规验证器。超预算、畸形哈希/长度/偏移/索引和未支持指令一律拒绝，不输出似是而非的部分成功报告。
+解析器支持标准 DEX 035–040 的 `invoke-virtual/super/direct/static/interface` 普通及 `/range` 形式，以及 `invoke-polymorphic` 的方法引用；`invoke-custom` 的 call-site 引用不是 `method_id`，当前版本明确拒绝。它不解析 APK 容器、多 DEX 聚合、运行时加载的代码，也不是完整 DEX 合规验证器。所检查的哈希、长度、偏移、索引、MUTF-8、异常表、指令和资源预算失效时会拒绝整个输入；未覆盖的 DEX 语义不能据此推断有效。
 
 验证仅编译无害自有 Java 样本，不执行样本，也不下载或分发第三方 APK。任何公开材料都应保留自有实现与上游固定参考的权利边界。CVP 资格需要真实申请场景及外部审核，本实验无法单独证明。

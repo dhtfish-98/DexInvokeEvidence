@@ -15,6 +15,14 @@ from dataclasses import asdict, dataclass
 MAX_FILE_BYTES = 64 * 1024 * 1024
 MAX_CODE_UNITS_TOTAL = 2_000_000
 MAX_INVOKE_SITES = 100_000
+MAX_STRING_ENCODED_BYTES = 16 * 1024
+MAX_STRING_UTF16_UNITS = 8 * 1024
+MAX_DECODED_STRING_BYTES_TOTAL = 8 * 1024 * 1024
+MAX_PROTO_PARAMETERS = 1024
+MAX_SYMBOL_TEXT_BYTES = 8 * 1024
+MAX_METHOD_TEXT_BYTES_TOTAL = 8 * 1024 * 1024
+MAX_REPORT_ESTIMATED_BYTES = 32 * 1024 * 1024
+MAX_CLASS_MEMBERS_TOTAL = 1_000_000
 
 
 class DexError(ValueError):
@@ -64,6 +72,21 @@ _WIDTH_3 = frozenset(
 )
 
 
+def _decode_mutf8(raw: bytes, utf16_length: int) -> str:
+    """Decode DEX MUTF-8 without accepting standard UTF-8 four-byte forms."""
+    if any(byte >= 0xF0 for byte in raw):
+        raise DexError("DEX string uses unsupported four-byte UTF-8")
+    try:
+        units = raw.replace(b"\xc0\x80", b"\x00").decode("utf-8", "surrogatepass")
+        if len(units) != utf16_length:
+            raise DexError("DEX string UTF-16 length mismatch")
+        return units.encode("utf-16-le", "surrogatepass").decode(
+            "utf-16-le", "surrogatepass"
+        )
+    except UnicodeError as exc:
+        raise DexError("invalid modified UTF-8 string") from exc
+
+
 class DexInvokeParser:
     """Validate a bounded DEX file and locate method-reference invocations."""
 
@@ -91,7 +114,13 @@ class DexInvokeParser:
         self.class_defs_off = 0
         self._strings: dict[int, str] = {}
         self._types: dict[int, str] = {}
+        self._protos: dict[int, str] = {}
         self._methods: dict[int, str] = {}
+        self._decoded_string_bytes = 0
+        self._method_text_bytes = 0
+        self._report_estimated_bytes = 0
+        self._class_members_total = 0
+        self.validated_try_items = 0
         self._total_code_units = 0
         self._used_code_offsets: set[int] = set()
         self._sites: list[InvokeSite] = []
@@ -213,19 +242,16 @@ class DexInvokeParser:
         off = self._u32(self.string_ids_off + index * 4)
         self._data_span(off, 1, "string_data_item")
         utf16_length, at = self._uleb(off)
-        end = self.data.find(b"\x00", at)
+        if utf16_length > MAX_STRING_UTF16_UNITS:
+            raise DexError("DEX string exceeds UTF-16 unit budget")
+        end = self.data.find(b"\x00", at, min(self.size, at + MAX_STRING_ENCODED_BYTES + 1))
         if end < 0:
-            raise DexError("unterminated DEX string")
+            raise DexError("unterminated or over-budget DEX string")
         raw = self.data[at:end]
-        try:
-            initial = raw.replace(b"\xc0\x80", b"\x00").decode("utf-8", "surrogatepass")
-            value = initial.encode("utf-16-le", "surrogatepass").decode(
-                "utf-16-le", "surrogatepass"
-            )
-            if len(value.encode("utf-16-le", "surrogatepass")) // 2 != utf16_length:
-                raise DexError("DEX string UTF-16 length mismatch")
-        except UnicodeError as exc:
-            raise DexError("invalid modified UTF-8 string") from exc
+        self._decoded_string_bytes += len(raw)
+        if self._decoded_string_bytes > MAX_DECODED_STRING_BYTES_TOTAL:
+            raise DexError("DEX decoded string budget exceeded")
+        value = _decode_mutf8(raw, utf16_length)
         self._strings[index] = value
         return value
 
@@ -240,22 +266,31 @@ class DexInvokeParser:
     def _proto(self, index: int) -> str:
         if not 0 <= index < self.proto_ids_size:
             raise DexError("prototype index out of bounds")
+        if index in self._protos:
+            return self._protos[index]
         off = self.proto_ids_off + index * 12
         self._string(self._u32(off))  # shorty index must resolve even if unused
         return_type = self._type(self._u32(off + 4))
         parameters_off = self._u32(off + 8)
         params: list[str] = []
+        text_bytes = 2 + len(return_type.encode("utf-8", "surrogatepass"))
         if parameters_off:
             if parameters_off % 4:
                 raise DexError("unaligned type_list")
             self._data_span(parameters_off, 4, "type_list")
             count = self._u32(parameters_off)
-            if count > 65535:
+            if count > MAX_PROTO_PARAMETERS:
                 raise DexError("type_list exceeds supported parameter budget")
             self._data_span(parameters_off, 4 + 2 * count, "type_list")
             for i in range(count):
-                params.append(self._type(self._u16(parameters_off + 4 + i * 2)))
-        return "(" + "".join(params) + ")" + return_type
+                param = self._type(self._u16(parameters_off + 4 + i * 2))
+                text_bytes += len(param.encode("utf-8", "surrogatepass"))
+                if text_bytes > MAX_SYMBOL_TEXT_BYTES:
+                    raise DexError("prototype text budget exceeded")
+                params.append(param)
+        value = "(" + "".join(params) + ")" + return_type
+        self._protos[index] = value
+        return value
 
     def _method(self, index: int) -> str:
         if not 0 <= index < self.method_ids_size:
@@ -265,7 +300,14 @@ class DexInvokeParser:
             class_type = self._type(self._u16(off))
             proto = self._proto(self._u16(off + 2))
             name = self._string(self._u32(off + 4))
-            self._methods[index] = f"{class_type}->{name}{proto}"
+            value = f"{class_type}->{name}{proto}"
+            text_bytes = len(value.encode("utf-8", "surrogatepass"))
+            if text_bytes > MAX_SYMBOL_TEXT_BYTES:
+                raise DexError("method text budget exceeded")
+            self._method_text_bytes += text_bytes
+            if self._method_text_bytes > MAX_METHOD_TEXT_BYTES_TOTAL:
+                raise DexError("DEX method text budget exceeded")
+            self._methods[index] = value
         return self._methods[index]
 
     @staticmethod
@@ -334,6 +376,8 @@ class DexInvokeParser:
         pc = 0
         while pc < count:
             starts.add(pc)
+            if units[pc] in {0x0100, 0x0200, 0x0300} and pc & 1:
+                raise DexError("unaligned DEX payload pseudo-instruction")
             width = self._instruction_width(units, pc)
             if pc + width > count:
                 raise DexError("truncated DEX instruction or payload")
@@ -345,11 +389,18 @@ class DexInvokeParser:
             if opcode in _INVOKES:
                 target_index = units[pc + 1]
                 target = self._method(target_index)
+                caller = self._method(caller_index)
                 if opcode in {0xFA, 0xFB}:
                     self._proto(units[pc + 3])
+                self._report_estimated_bytes += 256 + 6 * (
+                    len(caller.encode("utf-8", "surrogatepass"))
+                    + len(target.encode("utf-8", "surrogatepass"))
+                )
+                if self._report_estimated_bytes > MAX_REPORT_ESTIMATED_BYTES:
+                    raise DexError("DEX report budget exceeded")
                 self._sites.append(
                     InvokeSite(
-                        caller=self._method(caller_index),
+                        caller=caller,
                         caller_method_index=caller_index,
                         code_unit_offset=pc,
                         file_offset=insns_off + 2 * pc,
@@ -372,20 +423,32 @@ class DexInvokeParser:
         for target_pc, expected in payload_refs:
             if target_pc not in starts or units[target_pc] != expected:
                 raise DexError("invalid switch or array-data payload offset")
-        self._validate_tries(code_off, count, tries_size)
+        self._validate_tries(code_off, count, tries_size, starts)
+        self.validated_try_items += tries_size
 
-    def _validate_tries(self, code_off: int, insns_size: int, tries_size: int) -> None:
+    def _validate_tries(
+        self, code_off: int, insns_size: int, tries_size: int, starts: set[int]
+    ) -> None:
         if tries_size == 0:
             return
         after_insns = code_off + 16 + 2 * insns_size
+        if insns_size & 1 and self._u16(after_insns) != 0:
+            raise DexError("nonzero code_item padding")
         tries_off = after_insns + (2 if insns_size & 1 else 0)
         self._data_span(tries_off, 8 * tries_size, "try_item list")
         handler_offsets = [self._u16(tries_off + i * 8 + 6) for i in range(tries_size)]
+        previous_end = 0
         for i in range(tries_size):
             start = self._u32(tries_off + 8 * i)
             length = self._u16(tries_off + 8 * i + 4)
             if length == 0 or start >= insns_size or length > insns_size - start:
                 raise DexError("try_item range outside code")
+            end = start + length
+            if start < previous_end or start not in starts or (
+                end != insns_size and end not in starts
+            ):
+                raise DexError("try_item range is unaligned or overlaps")
+            previous_end = end
         handlers_off = tries_off + 8 * tries_size
         count, at = self._uleb(handlers_off)
         if count == 0 or count > 65535:
@@ -400,12 +463,12 @@ class DexInvokeParser:
                 type_index, at = self._uleb(at)
                 address, at = self._uleb(at)
                 self._type(type_index)
-                if address >= insns_size:
-                    raise DexError("catch handler target outside code")
+                if address not in starts:
+                    raise DexError("catch handler target outside instruction boundaries")
             if signed_count <= 0:
                 address, at = self._uleb(at)
-                if address >= insns_size:
-                    raise DexError("catch-all target outside code")
+                if address not in starts:
+                    raise DexError("catch-all target outside instruction boundaries")
         if any(offset not in seen for offset in handler_offsets):
             raise DexError("try_item references missing catch handler")
 
@@ -419,6 +482,9 @@ class DexInvokeParser:
             raise DexError("class_data field count exceeds field table")
         if direct_count + virtual_count > self.method_ids_size:
             raise DexError("class_data method count exceeds method table")
+        self._class_members_total += static_count + instance_count + direct_count + virtual_count
+        if self._class_members_total > MAX_CLASS_MEMBERS_TOTAL:
+            raise DexError("class_data member budget exceeded")
         for count in (static_count, instance_count):
             field_index = 0
             for _ in range(count):

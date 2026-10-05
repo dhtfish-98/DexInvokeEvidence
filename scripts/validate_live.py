@@ -88,8 +88,19 @@ def malformed_cases(data: bytes, parser: DexInvokeParser, sites, dexdump: str):
     wrong_string = bytearray(data)
     method_off = parser.method_ids_off + first.target_method_index * 8
     name_index = struct.unpack_from("<I", data, method_off + 4)[0]
-    struct.pack_into("<I", wrong_string, parser.string_ids_off + name_index * 4, len(data) + 1)
+    string_id_off = parser.string_ids_off + name_index * 4
+    string_data_off = struct.unpack_from("<I", data, string_id_off)[0]
+    struct.pack_into("<I", wrong_string, string_id_off, len(data) + 1)
     cases["string_offset_out_of_bounds"] = resign(wrong_string)
+
+    four_byte_string = bytearray(data)
+    _, text_off = parser._uleb(string_data_off)
+    four_byte_string[text_off:text_off + 4] = b"\xf0\x90\x80\x80"
+    cases["four_byte_utf8_not_mutf8"] = resign(four_byte_string)
+
+    oversized_string = bytearray(data)
+    oversized_string[string_data_off:string_data_off + 2] = b"\x81\x40"
+    cases["string_utf16_budget_exceeded"] = resign(oversized_string)
 
     code_off = first.file_offset - 16 - first.code_unit_offset * 2
     wrong_code_size = bytearray(data)
@@ -170,6 +181,8 @@ def main(argv: list[str] | None = None) -> int:
     data = dex_file.read_bytes()
     parser = DexInvokeParser(data)
     sites = parser.scan()
+    if parser.validated_try_items == 0:
+        raise AssertionError("fixture did not exercise DEX try/catch validation")
     actual = sorted(
         (site.file_offset, site.code_unit_offset, site.opcode, site.target_method_index)
         for site in sites
@@ -231,6 +244,7 @@ def main(argv: list[str] | None = None) -> int:
         "invocation_categories": sorted(seen),
         "oracle_exact_tuple_match": actual == oracle,
         "array_data_marker_present_once": True,
+        "validated_try_items": parser.validated_try_items,
         "malformed_rejected_count": len(rejected),
         "malformed_rejected": rejected,
         "single_byte_mutation_probe": {

@@ -30,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
         "site_count": len(sites),
         "sites": [site.to_dict() for site in sites],
     }
-    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    print(json.dumps(report, ensure_ascii=True, indent=2, sort_keys=True))
     return 0
 
 
