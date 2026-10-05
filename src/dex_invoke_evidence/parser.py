@@ -20,9 +20,12 @@ MAX_STRING_UTF16_UNITS = 8 * 1024
 MAX_DECODED_STRING_BYTES_TOTAL = 8 * 1024 * 1024
 MAX_PROTO_PARAMETERS = 1024
 MAX_SYMBOL_TEXT_BYTES = 8 * 1024
+MAX_PROTO_TEXT_BYTES_TOTAL = 8 * 1024 * 1024
 MAX_METHOD_TEXT_BYTES_TOTAL = 8 * 1024 * 1024
 MAX_REPORT_ESTIMATED_BYTES = 32 * 1024 * 1024
 MAX_CLASS_MEMBERS_TOTAL = 1_000_000
+MAX_CATCH_HANDLERS_TOTAL = 100_000
+MAX_CATCH_ITEMS_TOTAL = 100_000
 
 
 class DexError(ValueError):
@@ -117,9 +120,12 @@ class DexInvokeParser:
         self._protos: dict[int, str] = {}
         self._methods: dict[int, str] = {}
         self._decoded_string_bytes = 0
+        self._proto_text_bytes = 0
         self._method_text_bytes = 0
         self._report_estimated_bytes = 0
         self._class_members_total = 0
+        self._catch_handlers_total = 0
+        self._catch_items_total = 0
         self.validated_try_items = 0
         self._total_code_units = 0
         self._used_code_offsets: set[int] = set()
@@ -274,6 +280,8 @@ class DexInvokeParser:
         parameters_off = self._u32(off + 8)
         params: list[str] = []
         text_bytes = 2 + len(return_type.encode("utf-8", "surrogatepass"))
+        if text_bytes > MAX_SYMBOL_TEXT_BYTES:
+            raise DexError("prototype text budget exceeded")
         if parameters_off:
             if parameters_off % 4:
                 raise DexError("unaligned type_list")
@@ -289,6 +297,9 @@ class DexInvokeParser:
                     raise DexError("prototype text budget exceeded")
                 params.append(param)
         value = "(" + "".join(params) + ")" + return_type
+        self._proto_text_bytes += text_bytes
+        if self._proto_text_bytes > MAX_PROTO_TEXT_BYTES_TOTAL:
+            raise DexError("DEX prototype text budget exceeded")
         self._protos[index] = value
         return value
 
@@ -453,12 +464,18 @@ class DexInvokeParser:
         count, at = self._uleb(handlers_off)
         if count == 0 or count > 65535:
             raise DexError("invalid encoded_catch_handler_list size")
+        self._catch_handlers_total += count
+        if self._catch_handlers_total > MAX_CATCH_HANDLERS_TOTAL:
+            raise DexError("DEX catch handler list budget exceeded")
         seen: set[int] = set()
         for _ in range(count):
             seen.add(at - handlers_off)
             signed_count, at = self._sleb(at)
             if abs(signed_count) > 65535:
                 raise DexError("catch handler count exceeds supported budget")
+            self._catch_items_total += abs(signed_count) + int(signed_count <= 0)
+            if self._catch_items_total > MAX_CATCH_ITEMS_TOTAL:
+                raise DexError("DEX catch item budget exceeded")
             for _ in range(abs(signed_count)):
                 type_index, at = self._uleb(at)
                 address, at = self._uleb(at)

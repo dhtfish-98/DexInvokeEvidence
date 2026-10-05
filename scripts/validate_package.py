@@ -16,6 +16,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 BUILD = ROOT / "Build" / "validation"
 VERSION = "0.1.0"
+EXPECTED_TESTS = 7
 
 
 def sha256(path: Path) -> str:
@@ -107,7 +108,7 @@ def main() -> int:
                 or metadata["author_email"] != "dhtfish98 <109978225+dhtfish-98@users.noreply.github.com>"
                 or not Path(metadata["module"]).is_relative_to(venv)):
             raise RuntimeError(f"{label} installed metadata mismatch")
-        installed[label] = {"tests_passed": "Ran 4 tests" in tests, "metadata": metadata}
+        installed[label] = {"tests_passed": f"Ran {EXPECTED_TESTS} tests" in tests, "metadata": metadata}
         if not installed[label]["tests_passed"]:
             raise RuntimeError(f"{label} installed tests incomplete")
 
