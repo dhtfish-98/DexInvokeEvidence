@@ -1,0 +1,6 @@
+graft tests
+graft scripts
+recursive-include 项目文档 *.md LICENSE
+prune Build
+global-exclude *.pyc
+global-exclude __pycache__

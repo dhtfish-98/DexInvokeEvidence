@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dex-invoke-evidence"
+version = "0.1.0"
+description = "Bounded static invocation locations from authorized DEX files"
+requires-python = ">=3.11"
+authors = [{name = "dhtfish98", email = "109978225+dhtfish-98@users.noreply.github.com"}]
+readme = "项目文档/README.md"
+license = "MIT"
+license-files = ["项目文档/LICENSE"]
+dependencies = []
+
+[project.scripts]
+dex-invoke-evidence = "dex_invoke_evidence.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools]
+include-package-data = true
